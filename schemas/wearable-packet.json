@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WearableIngestRequest",
+  "description": "Body of POST /api/wearable/ingest — one batch of Khoi wearable readings.",
+  "type": "object",
+  "required": ["deviceSerial", "athleteId", "readings"],
+  "properties": {
+    "deviceSerial": { "type": "string", "example": "KHOI-0042" },
+    "athleteId": { "type": "string", "description": "Matches AspNetUsers.Id" },
+    "batteryPercent": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "readings": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/reading" }
+    }
+  },
+  "definitions": {
+    "reading": {
+      "type": "object",
+      "required": ["timestamp"],
+      "properties": {
+        "timestamp": { "type": "string", "format": "date-time" },
+        "heartRate": { "type": "integer", "description": "bpm" },
+        "recoveryScore": { "type": "number", "description": "0-100" },
+        "stressLevel": { "type": "number", "description": "0-100" },
+        "spo2": { "type": "number", "description": "0-100 %" },
+        "hydrationPct": { "type": "number", "description": "0-100" },
+        "staminaPct": { "type": "number", "description": "0-100" }
+      }
+    }
+  },
+  "example": {
+    "deviceSerial": "KHOI-0042",
+    "athleteId": "3f2c1e0a-....",
+    "batteryPercent": 71,
+    "readings": [
+      {
+        "timestamp": "2026-07-01T10:15:00Z",
+        "heartRate": 142,
+        "recoveryScore": 78,
+        "stressLevel": 34,
+        "spo2": 97,
+        "hydrationPct": 82,
+        "staminaPct": 65
+      }
+    ]
+  }
+}

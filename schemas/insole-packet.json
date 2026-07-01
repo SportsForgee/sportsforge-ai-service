@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "InsoleIngestRequest",
+  "description": "Body of POST /api/insole/ingest — one batch of Forge Insole readings.",
+  "type": "object",
+  "required": ["deviceSerial", "athleteId", "source", "readings"],
+  "properties": {
+    "deviceSerial": { "type": "string", "example": "ForgeInsole-A1B2" },
+    "athleteId": { "type": "string", "description": "Matches AspNetUsers.Id" },
+    "source": { "type": "string", "enum": ["Live", "OfflineSync"] },
+    "readings": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/reading" }
+    }
+  },
+  "definitions": {
+    "reading": {
+      "type": "object",
+      "required": ["timestamp", "foot"],
+      "properties": {
+        "timestamp": { "type": "string", "format": "date-time" },
+        "foot": { "type": "string", "enum": ["L", "R"] },
+        "pressureMap": {
+          "type": "object",
+          "description": "Free-form per-zone pressure values (0-100). Shape may change as the sensor array is redesigned.",
+          "example": { "heel": 62, "midfoot": 40, "forefoot": 78 }
+        },
+        "cadence": { "type": "number", "description": "steps per minute" },
+        "groundContactMs": { "type": "number" },
+        "footStrike": { "type": "string", "enum": ["Heel", "Midfoot", "Forefoot"] },
+        "strideAsymmetryPct": { "type": "number", "description": "0 = perfectly symmetric" },
+        "impactForce": { "type": "number", "description": "relative units, higher = harder landing" },
+        "balanceScore": { "type": "number", "description": "0-100, higher = more balanced" }
+      }
+    }
+  },
+  "example": {
+    "deviceSerial": "ForgeInsole-A1B2",
+    "athleteId": "3f2c1e0a-....",
+    "source": "Live",
+    "readings": [
+      {
+        "timestamp": "2026-07-01T10:15:00Z",
+        "foot": "L",
+        "pressureMap": { "heel": 55, "midfoot": 38, "forefoot": 71 },
+        "cadence": 172,
+        "groundContactMs": 218,
+        "footStrike": "Midfoot",
+        "strideAsymmetryPct": 6.5,
+        "impactForce": 1.8,
+        "balanceScore": 88
+      }
+    ]
+  }
+}
