@@ -1,0 +1,124 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "VideoAnalysisResult",
+  "description": "The result of running OpenCV + MediaPipe pose/speed analysis over one uploaded training/match clip. This is the wire contract between ai-service (producer, POSTs this to the API's callback endpoint) and backend/Api (consumer, persists + broadcasts it). Video is the first and, for this phase, only source of Top Speed and Gait-Balance vitals — the schema is shaped so a future Forge Insole source can populate the same downstream fields without any contract change.",
+  "type": "object",
+  "required": ["videoId", "athleteId", "status"],
+  "properties": {
+    "videoId": { "type": "string", "description": "Matches VideoUploads.Id on the API side" },
+    "athleteId": { "type": "string", "description": "Matches AspNetUsers.Id" },
+    "status": { "type": "string", "enum": ["Queued", "Processing", "Complete", "Failed"] },
+    "durationSeconds": { "type": "number" },
+    "fps": { "type": "number", "description": "Effective sampling fps used for pose extraction (~10-15), not the source video's native fps" },
+    "failureReason": { "type": "string", "description": "Set only when status = Failed" },
+
+    "poseMetrics": {
+      "type": "object",
+      "description": "Present only when status = Complete",
+      "properties": {
+        "jointAngleWindows": {
+          "type": "array",
+          "description": "Summarized joint-angle stats over fixed time windows (not raw per-frame data)",
+          "items": {
+            "type": "object",
+            "required": ["startSeconds", "endSeconds"],
+            "properties": {
+              "startSeconds": { "type": "number" },
+              "endSeconds": { "type": "number" },
+              "avgKneeAngleDeg": { "type": "number" },
+              "avgHipAngleDeg": { "type": "number" },
+              "avgAnkleAngleDeg": { "type": "number" }
+            }
+          }
+        },
+        "symmetryScore": { "type": "number", "description": "0-100, left/right joint-angle mirror delta, higher = more symmetric" },
+        "postureStabilityScore": { "type": "number", "description": "0-100, based on landmark jitter after smoothing" },
+        "detectionConfidence": { "type": "number", "description": "0-100. Fraction of sampled frames with a detected person, weighted by landmark visibility — surfaced so a clip where the pose model struggled isn't presented with the same trust as a clean one." },
+        "framesSampled": { "type": "integer", "description": "Total frames the pipeline sampled from the clip (at TARGET_FPS, not the source frame rate)" },
+        "framesWithPersonDetected": { "type": "integer", "description": "Of framesSampled, how many had a person detected at all" }
+      }
+    },
+
+    "speedMetrics": {
+      "type": "object",
+      "description": "Present only when status = Complete",
+      "properties": {
+        "topSpeedKmh": { "type": "number" },
+        "avgSpeedKmh": { "type": "number" },
+        "accelerationPeaksMs2": { "type": "array", "items": { "type": "number" } },
+        "strideFrequencyHz": { "type": "number" },
+        "calibration": {
+          "type": "object",
+          "required": ["method", "confidence"],
+          "properties": {
+            "method": { "type": "string", "enum": ["pitch-markings", "manual-distance", "uncalibrated"] },
+            "confidence": { "type": "number", "description": "0-1. Low/zero confidence + method=uncalibrated means topSpeedKmh/avgSpeedKmh are relative estimates only, not absolute — the API must not surface them as real km/h in that case." }
+          }
+        }
+      }
+    },
+
+    "gaitBalance": {
+      "type": "object",
+      "description": "Present only when status = Complete. Same 0-100 scale as the existing BodyMapHero Gait-Balance callout — this is the video-derived equivalent of InsoleSummaryDto.AvgBalanceScore.",
+      "properties": {
+        "score": { "type": "number" }
+      }
+    },
+
+    "anomalies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "severity", "timestampSeconds", "description"],
+        "properties": {
+          "type": { "type": "string", "example": "knee_valgus | asymmetric_stride | deceleration_form_breakdown" },
+          "severity": { "type": "string", "enum": ["Info", "Warning", "Critical"] },
+          "timestampSeconds": { "type": "number" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+
+    "keyframes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["timestampSeconds", "label", "thumbnailUrl"],
+        "properties": {
+          "timestampSeconds": { "type": "number" },
+          "label": { "type": "string", "example": "Peak speed | Knee valgus on landing" },
+          "thumbnailUrl": { "type": "string" }
+        }
+      }
+    }
+  },
+  "example": {
+    "videoId": "3f2c1e0a-....",
+    "athleteId": "cdbd4c19-e2e3-4359-ad8a-f6565187adb6",
+    "status": "Complete",
+    "durationSeconds": 12.4,
+    "fps": 12,
+    "poseMetrics": {
+      "jointAngleWindows": [
+        { "startSeconds": 0, "endSeconds": 2, "avgKneeAngleDeg": 162.3, "avgHipAngleDeg": 171.0, "avgAnkleAngleDeg": 94.2 }
+      ],
+      "symmetryScore": 82,
+      "postureStabilityScore": 76
+    },
+    "speedMetrics": {
+      "topSpeedKmh": 31.4,
+      "avgSpeedKmh": 18.9,
+      "accelerationPeaksMs2": [4.1, 3.6],
+      "strideFrequencyHz": 3.2,
+      "calibration": { "method": "pitch-markings", "confidence": 0.82 }
+    },
+    "gaitBalance": { "score": 88 },
+    "anomalies": [
+      { "type": "asymmetric_stride", "severity": "Warning", "timestampSeconds": 6.8, "description": "Left stride 14% shorter than right over a 2s window" }
+    ],
+    "keyframes": [
+      { "timestampSeconds": 3.1, "label": "Peak speed", "thumbnailUrl": "/storage/videos/.../keyframe_1.jpg" }
+    ]
+  }
+}
