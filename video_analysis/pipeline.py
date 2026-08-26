@@ -20,8 +20,8 @@ import cv2
 import numpy as np
 
 from .models import (
-    AnalysisResult, Anomaly, Calibration, GaitBalance, JointAngleWindow,
-    Keyframe, PoseMetrics, SpeedMetrics,
+    AnalysisResult, Anomaly, Calibration, DrillRecommendation, GaitBalance,
+    JointAngleWindow, Keyframe, PoseMetrics, SpeedMetrics,
 )
 from .codec_setup import ensure_h264_available
 from .pose_model import create_landmarker
@@ -31,6 +31,12 @@ logger = logging.getLogger("video_analysis")
 TARGET_FPS = 12
 WINDOW_SECONDS = 2.0
 SMOOTHING_FRAMES = 3
+
+# Anomaly-rule thresholds (see detect_anomalies() for the rules that use them).
+TRUNK_LEAN_THRESHOLD_DEG = 30.0
+FATIGUE_MIN_VALID_FRAMES = 6
+FATIGUE_STARTING_STABILITY_MIN = 50.0
+FATIGUE_STABILITY_DROP_THRESHOLD = 20.0
 
 # BlazePose (33-point) landmark indices used here.
 L_SHOULDER, R_SHOULDER = 11, 12
@@ -162,6 +168,40 @@ def _joint_angles(lm: List[Tuple[float, float, float]]):
     return avg_knee, avg_hip, avg_ankle, left_knee, right_knee
 
 
+def _trunk_lean_deg(lm: List[Tuple[float, float, float]]) -> float:
+    """Angle of the shoulder-hip line from vertical, in degrees — a "virtual point
+    directly above the hip" trick that reuses _angle_deg instead of new geometry:
+    the angle at the hip midpoint between the ray to the shoulder midpoint and a
+    ray straight up is exactly the trunk's lean from vertical."""
+    shoulder_mid = ((lm[L_SHOULDER][0] + lm[R_SHOULDER][0]) / 2, (lm[L_SHOULDER][1] + lm[R_SHOULDER][1]) / 2)
+    hip_mid = ((lm[L_HIP][0] + lm[R_HIP][0]) / 2, (lm[L_HIP][1] + lm[R_HIP][1]) / 2)
+    above_hip = (hip_mid[0], hip_mid[1] - 1.0)
+    return _angle_deg(shoulder_mid, hip_mid, above_hip)
+
+
+def _posture_stability_score(frames: List[PoseFrame]) -> float:
+    """Frame-to-frame hip-center jitter, converted to a 0-100 stability score
+    (jitter is in normalized-image-plane units; scaled empirically). Factored
+    out of compute_pose_metrics() so detect_anomalies() can compare stability
+    across the first vs second half of a clip (fatigue_drift) without
+    duplicating the math."""
+    prev_hip_center = None
+    jitter_samples: List[float] = []
+    for pf in frames:
+        if pf.landmarks is None:
+            continue
+        hip_center = ((pf.landmarks[L_HIP][0] + pf.landmarks[R_HIP][0]) / 2,
+                      (pf.landmarks[L_HIP][1] + pf.landmarks[R_HIP][1]) / 2)
+        if prev_hip_center is not None:
+            jitter_samples.append(math.hypot(hip_center[0] - prev_hip_center[0], hip_center[1] - prev_hip_center[1]))
+        prev_hip_center = hip_center
+
+    if not jitter_samples:
+        return 100.0
+    avg_jitter = sum(jitter_samples) / len(jitter_samples)
+    return max(0.0, min(100.0, 100.0 - avg_jitter * 800.0))
+
+
 def compute_pose_metrics(pose_frames: List[PoseFrame]) -> PoseMetrics:
     valid = [pf for pf in pose_frames if pf.landmarks is not None]
     if not valid:
@@ -178,13 +218,11 @@ def compute_pose_metrics(pose_frames: List[PoseFrame]) -> PoseMetrics:
 
     windows: List[JointAngleWindow] = []
     knee_deltas: List[float] = []
-    jitter_samples: List[float] = []
 
     start = valid[0].timestamp
     end_of_clip = valid[-1].timestamp
     window_start = start
 
-    prev_hip_center = None
     while window_start <= end_of_clip:
         window_end = window_start + WINDOW_SECONDS
         in_window = [pf for pf in valid if window_start <= pf.timestamp < window_end]
@@ -198,12 +236,6 @@ def compute_pose_metrics(pose_frames: List[PoseFrame]) -> PoseMetrics:
                 ankles.append(avg_ankle)
                 knee_deltas.append(abs(lk - rk))
 
-                hip_center = ((pf.landmarks[L_HIP][0] + pf.landmarks[R_HIP][0]) / 2,
-                              (pf.landmarks[L_HIP][1] + pf.landmarks[R_HIP][1]) / 2)
-                if prev_hip_center is not None:
-                    jitter_samples.append(math.hypot(hip_center[0] - prev_hip_center[0], hip_center[1] - prev_hip_center[1]))
-                prev_hip_center = hip_center
-
             windows.append(JointAngleWindow(
                 startSeconds=round(window_start, 2), endSeconds=round(window_end, 2),
                 avgKneeAngleDeg=round(sum(knees) / len(knees), 1),
@@ -216,9 +248,7 @@ def compute_pose_metrics(pose_frames: List[PoseFrame]) -> PoseMetrics:
     # 1 degree of L/R delta costs 2 symmetry points; fully symmetric (0 delta) = 100.
     symmetry_score = max(0.0, min(100.0, 100.0 - avg_knee_delta * 2.0))
 
-    avg_jitter = sum(jitter_samples) / len(jitter_samples) if jitter_samples else 0.0
-    # jitter is in normalized-image-plane units; scaled empirically for a 0-100 score.
-    posture_stability = max(0.0, min(100.0, 100.0 - avg_jitter * 800.0))
+    posture_stability = _posture_stability_score(valid)
 
     return PoseMetrics(
         jointAngleWindows=windows,
@@ -365,7 +395,97 @@ def detect_anomalies(pose_metrics: PoseMetrics, speed_metrics: SpeedMetrics, pos
                 ))
             run_start = None
 
+    # Trunk lean: sustained forward/backward lean is a common technique breakdown
+    # (and, like knee_valgus, an MVP 2D-plane heuristic — not true 3D posture analysis).
+    # Reuses the window boundaries pose_metrics already computed rather than
+    # re-deriving them.
+    for w in pose_metrics.jointAngleWindows:
+        in_window = [pf for pf in valid if w.startSeconds <= pf.timestamp < w.endSeconds]
+        if not in_window:
+            continue
+        avg_lean = sum(_trunk_lean_deg(pf.landmarks) for pf in in_window) / len(in_window)
+        if avg_lean > TRUNK_LEAN_THRESHOLD_DEG:
+            anomalies.append(Anomaly(
+                type="trunk_lean", severity="Warning", timestampSeconds=w.startSeconds,
+                description=f"Trunk leaned ~{avg_lean:.0f}° from vertical in this window — sustained lean can signal fatigue or poor running posture; review form.",
+            ))
+            break  # one flag is enough for the MVP; don't spam per-window
+
+    # Fatigue drift: posture_stability above is a whole-clip average, which can hide a
+    # clip that started clean and fell apart later — a real, common in-clip pattern as
+    # fatigue sets in, distinct from sudden_instability's single sharp event above.
+    if len(valid) >= FATIGUE_MIN_VALID_FRAMES:
+        mid = len(valid) // 2
+        first_stability = _posture_stability_score(valid[:mid])
+        second_stability = _posture_stability_score(valid[mid:])
+        if first_stability >= FATIGUE_STARTING_STABILITY_MIN and \
+                (first_stability - second_stability) > FATIGUE_STABILITY_DROP_THRESHOLD:
+            anomalies.append(Anomaly(
+                type="fatigue_drift", severity="Warning", timestampSeconds=round(valid[mid].timestamp, 2),
+                description=(
+                    f"Movement stability dropped from {first_stability:.0f}/100 in the first half of the "
+                    f"clip to {second_stability:.0f}/100 in the second half — a common sign of fatigue "
+                    "affecting form late in a set. Consider shorter reps or more rest."
+                ),
+            ))
+
     return anomalies
+
+
+# Static anomaly-type -> suggested focus area lookup. Deliberately not the coach's
+# per-org Drill library (a different domain: coach-assigned training sessions) — this
+# is a lightweight, curated suggestion computed straight off what the clip showed.
+# tracking_lost is intentionally absent: it's a filming/data-quality flag (camera lost
+# the athlete), not a movement issue — no drill fixes that. category values reuse the
+# same vocabulary as Drill.Category so this can plug into the real library later.
+_DRILL_SUGGESTIONS = {
+    "asymmetric_stride": DrillRecommendation(
+        anomalyType="asymmetric_stride", category="skill",
+        title="Single-Leg Stability Drills",
+        description="Single-leg RDLs and lateral step-downs to build left/right symmetry and correct stride imbalance.",
+    ),
+    "knee_valgus": DrillRecommendation(
+        anomalyType="knee_valgus", category="strength",
+        title="Knee-Tracking Strength Work",
+        description="Banded lateral walks and controlled box step-downs to reinforce proper knee alignment under load.",
+    ),
+    "deceleration_form_breakdown": DrillRecommendation(
+        anomalyType="deceleration_form_breakdown", category="strength",
+        title="Posture & Core Stability",
+        description="Dead bug and plank progressions to build the core control needed to hold form as movement gets less controlled.",
+    ),
+    "sudden_instability": DrillRecommendation(
+        anomalyType="sudden_instability", category="skill",
+        title="Balance & Fall-Recovery Drills",
+        description="Single-leg balance holds and reactive-balance drills to reduce the chance of a stumble like this recurring.",
+    ),
+    "trunk_lean": DrillRecommendation(
+        anomalyType="trunk_lean", category="strength",
+        title="Posture & Trunk Control",
+        description="Core anti-flexion work (planks, pallof presses) to keep your trunk upright and stable during movement.",
+    ),
+    "fatigue_drift": DrillRecommendation(
+        anomalyType="fatigue_drift", category="endurance",
+        title="Conditioning & Work Capacity",
+        description="Interval conditioning (e.g. repeated shuttle sets with short rest) to extend how long you can hold clean form.",
+    ),
+}
+
+
+def recommend_drills(anomalies: List[Anomaly]) -> List[DrillRecommendation]:
+    """One suggestion per distinct flagged anomaly type, ordered by severity —
+    same dedupe/ordering convention as generate_keyframes()."""
+    severity_rank = {"Critical": 0, "Warning": 1, "Info": 2}
+    ranked = sorted(anomalies, key=lambda a: severity_rank.get(a.severity, 3))
+
+    seen: set = set()
+    recommendations: List[DrillRecommendation] = []
+    for a in ranked:
+        if a.type in seen or a.type not in _DRILL_SUGGESTIONS:
+            continue
+        seen.add(a.type)
+        recommendations.append(_DRILL_SUGGESTIONS[a.type])
+    return recommendations
 
 
 # Lower-body skeleton edges — mirrors what this pipeline actually measures (knee/hip/
@@ -494,6 +614,7 @@ def analyze_video(video_id: str, athlete_id: str, video_path: str, storage_thumb
     gait_balance = compute_gait_balance(pose_metrics)
     anomalies = detect_anomalies(pose_metrics, speed_metrics, pose_frames)
     keyframes = generate_keyframes(frames, pose_frames, anomalies, athlete_id, video_id, storage_thumbnail_fn)
+    drill_recommendations = recommend_drills(anomalies)
 
     annotated_video_url = None
     if storage_annotated_video_fn is not None:
@@ -510,4 +631,5 @@ def analyze_video(video_id: str, athlete_id: str, video_path: str, storage_thumb
         durationSeconds=round(info.duration_seconds, 2), fps=round(info.fps, 2),
         poseMetrics=pose_metrics, speedMetrics=speed_metrics, gaitBalance=gait_balance,
         anomalies=anomalies, keyframes=keyframes, annotatedVideoUrl=annotated_video_url,
+        drillRecommendations=drill_recommendations,
     )
