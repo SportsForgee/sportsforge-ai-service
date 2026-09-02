@@ -66,6 +66,13 @@ class Keyframe(BaseModel):
     thumbnailUrl: str
 
 
+class DrillRecommendation(BaseModel):
+    anomalyType: str
+    title: str
+    description: str
+    category: str  # matches Drill.Category's vocabulary: strength | endurance | skill | speed | recovery | general
+
+
 class AnalysisResult(BaseModel):
     videoId: str
     athleteId: str
@@ -84,3 +91,4 @@ class AnalysisResult(BaseModel):
     gaitBalance: Optional[GaitBalance] = None
     anomalies: List[Anomaly] = []
     keyframes: List[Keyframe] = []
+    drillRecommendations: List[DrillRecommendation] = []
