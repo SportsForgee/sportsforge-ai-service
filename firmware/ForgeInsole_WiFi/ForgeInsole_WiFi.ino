@@ -45,7 +45,7 @@ const char *MDNS_HOST       = "forge-insole-l";  // -> http://forge-insole-l.loc
 
 #define UNIT_FOOT   "L"
 #define UNIT_PAIR   "PAIR-01"
-#define FW_VERSION  "1.0.0-wifi"
+#define FW_VERSION  "1.0.1-wifi"
 
 static const uint16_t HTTP_PORT = 80;
 static const uint16_t WS_PORT   = 81;
@@ -246,10 +246,47 @@ static void mpuCalibrateGyro(uint16_t samples = 200) {
 // ===========================================================================
 // Pressure
 // ===========================================================================
+// Anything this close to baseline is reported as exactly 0. Two things leave a zone
+// sitting a few tens of counts high after the load comes off: the FSR itself creeps
+// for a second or two, and a high-impedance ADC input holds residual charge. Without a
+// floor, both show up as phantom load that never quite returns to zero.
+static const uint16_t ZONE_NOISE_FLOOR = 60;
+
+// While a zone is unloaded, its baseline slowly follows the raw reading so thermal
+// drift and slow creep are absorbed instead of surfacing as a constant offset. It only
+// runs when the whole foot is off the ground (see readAllFsr), never faster than
+// DRIFT_STEP_EVERY samples, and never when the raw value is far enough above baseline
+// to be a real load - so a sustained press can't be "learned" as zero.
+static const uint16_t DRIFT_TRACK_BAND = 150;   // counts above baseline still treated as drift
+static const uint8_t  DRIFT_STEP_EVERY = 10;    // 100 Hz / 10 = one count of correction per 100 ms
+
 static uint16_t readFsr(int pin) {
+  // The ESP32 ADC shares one sample-and-hold capacitor across every channel. Switching
+  // to a new pin leaves the previous pin's charge sitting on it, and an unloaded FSR is
+  // a multi-megohm source that cannot pull it off in time - so the first conversion
+  // after a switch reads the *previous* sensor, and pressing one zone bleeds into the
+  // next one sampled. Throw that conversion away and give the input a moment to settle
+  // before the samples that count.
+  (void)analogRead(pin);
+  delayMicroseconds(25);
   uint32_t acc = 0;
   for (uint8_t i = 0; i < 4; i++) acc += analogRead(pin);
   return (uint16_t)(acc / 4);
+}
+
+// Calibrated zone value: raw minus baseline, floored at ZONE_NOISE_FLOOR, with slow
+// baseline tracking while unloaded. 'trackDrift' is only true when nothing is on the
+// insole at all, so one zone can't be re-zeroed while the foot is partly loaded.
+static uint16_t calibrateZone(uint16_t rawV, uint16_t &base, bool trackDrift) {
+  uint16_t z = subFloor(rawV, base);
+  if (z >= ZONE_NOISE_FLOOR) return z;
+
+  if (trackDrift) {
+    int32_t d = (int32_t)rawV - (int32_t)base;
+    if (d > 0 && d < DRIFT_TRACK_BAND) base++;
+    else if (d < 0)                    base--;
+  }
+  return 0;
 }
 
 static void readAllFsr() {
@@ -258,10 +295,16 @@ static void readAllFsr() {
   raw.left  = readFsr(PIN_FSR_LEFT);
   raw.right = readFsr(PIN_FSR_RIGHT);
 
-  zone.heel  = subFloor(raw.heel,  baseline.heel);
-  zone.toe   = subFloor(raw.toe,   baseline.toe);
-  zone.left  = subFloor(raw.left,  baseline.left);
-  zone.right = subFloor(raw.right, baseline.right);
+  // Only let baselines drift when the previous sample showed the foot fully off the
+  // ground, and only every DRIFT_STEP_EVERY samples, so the correction is gentle.
+  static uint8_t driftTick = 0;
+  bool track = !inContact && (++driftTick >= DRIFT_STEP_EVERY);
+  if (track) driftTick = 0;
+
+  zone.heel  = calibrateZone(raw.heel,  baseline.heel,  track);
+  zone.toe   = calibrateZone(raw.toe,   baseline.toe,   track);
+  zone.left  = calibrateZone(raw.left,  baseline.left,  track);
+  zone.right = calibrateZone(raw.right, baseline.right, track);
 
   if (zone.heel  > peak.heel)  peak.heel  = zone.heel;
   if (zone.toe   > peak.toe)   peak.toe   = zone.toe;
