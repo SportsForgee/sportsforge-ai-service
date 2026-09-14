@@ -25,6 +25,7 @@ from .models import (
 )
 from .codec_setup import ensure_h264_available
 from .pose_model import create_landmarker
+from .ball_tracking import detect_ball, compute_ball_metrics
 
 logger = logging.getLogger("video_analysis")
 
@@ -616,6 +617,16 @@ def analyze_video(video_id: str, athlete_id: str, video_path: str, storage_thumb
     keyframes = generate_keyframes(frames, pose_frames, anomalies, athlete_id, video_id, storage_thumbnail_fn)
     drill_recommendations = recommend_drills(anomalies)
 
+    # Ball detection/tracking (Phase 3) is additive — never let it take down pose/speed
+    # analysis, which is the core deliverable this pipeline already provides.
+    try:
+        ball_frames = detect_ball(frames, info.frame_width, info.frame_height)
+        ball_metrics = compute_ball_metrics(ball_frames, info.frame_width, info.frame_height,
+                                             reference_distance_m, reference_pixels)
+    except Exception:
+        logger.exception("Ball detection failed for videoId=%s — continuing without it.", video_id)
+        ball_metrics = None
+
     annotated_video_url = None
     if storage_annotated_video_fn is not None:
         try:
@@ -631,5 +642,5 @@ def analyze_video(video_id: str, athlete_id: str, video_path: str, storage_thumb
         durationSeconds=round(info.duration_seconds, 2), fps=round(info.fps, 2),
         poseMetrics=pose_metrics, speedMetrics=speed_metrics, gaitBalance=gait_balance,
         anomalies=anomalies, keyframes=keyframes, annotatedVideoUrl=annotated_video_url,
-        drillRecommendations=drill_recommendations,
+        drillRecommendations=drill_recommendations, ballMetrics=ball_metrics,
     )

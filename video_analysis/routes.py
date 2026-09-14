@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks
 from .models import AnalyzeRequest, AnalysisResult
 from .pipeline import analyze_video
 from .pose_model import is_model_ready
+from .ball_model import is_model_ready as is_ball_model_ready
 
 logger = logging.getLogger("video_analysis")
 router = APIRouter()
@@ -37,7 +38,8 @@ def annotated_video_path(athlete_id: str, video_id: str):
 
 @router.get("/video/health")
 def video_health():
-    status = {"opencvAvailable": False, "mediapipeAvailable": False, "modelReady": False}
+    status = {"opencvAvailable": False, "mediapipeAvailable": False, "modelReady": False,
+              "ultralyticsAvailable": False, "ballModelReady": False}
     try:
         import cv2  # noqa: F401
         status["opencvAvailable"] = True
@@ -48,7 +50,13 @@ def video_health():
         status["mediapipeAvailable"] = True
     except Exception:
         pass
+    try:
+        import ultralytics  # noqa: F401
+        status["ultralyticsAvailable"] = True
+    except Exception:
+        pass
     status["modelReady"] = is_model_ready()
+    status["ballModelReady"] = is_ball_model_ready()
     return status
 
 
