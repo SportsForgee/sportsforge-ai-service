@@ -1,0 +1,11 @@
+{
+  "name": "forge-insole-sim",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Simulates a Forge Insole streaming readings to backend/Api over the real ingestion contract.",
+  "main": "index.mjs",
+  "scripts": {
+    "start": "node index.mjs"
+  }
+}
