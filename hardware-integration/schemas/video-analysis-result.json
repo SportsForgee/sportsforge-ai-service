@@ -66,6 +66,55 @@
       }
     },
 
+    "ballMetrics": {
+      "type": "object",
+      "description": "Present only when status = Complete. Phase 3: YOLOv8 (COCO 'sports ball' class) detection + trajectory across the same sampled frames used for pose analysis.",
+      "properties": {
+        "detected": { "type": "boolean", "description": "Whether a ball was detected in at least one sampled frame" },
+        "framesSampled": { "type": "integer" },
+        "framesWithBallDetected": { "type": "integer" },
+        "detectionConfidence": { "type": "number", "description": "0-100. Avg YOLO confidence across frames where the ball was detected." },
+        "trajectory": {
+          "type": "array",
+          "description": "Ball center position per frame where it was detected — enough to draw a trajectory overlay",
+          "items": {
+            "type": "object",
+            "required": ["timestampSeconds", "xNorm", "yNorm", "confidence"],
+            "properties": {
+              "timestampSeconds": { "type": "number" },
+              "xNorm": { "type": "number", "description": "0-1, normalized across frame width" },
+              "yNorm": { "type": "number", "description": "0-1, normalized across frame height" },
+              "confidence": { "type": "number", "description": "0-1 YOLO detection confidence" }
+            }
+          }
+        },
+        "topSpeedKmh": { "type": "number", "description": "Only populated when calibration.method != uncalibrated — same rule as speedMetrics" },
+        "avgSpeedKmh": { "type": "number" },
+        "shots": {
+          "type": "array",
+          "description": "Phase 4: discrete shot/strike events — frame-to-frame ball speed spikes far above the clip's own typical ball movement. Timing is reported even when uncalibrated; speedKmh follows the same calibration rule as topSpeedKmh.",
+          "items": {
+            "type": "object",
+            "required": ["timestampSeconds"],
+            "properties": {
+              "timestampSeconds": { "type": "number" },
+              "speedKmh": { "type": "number", "description": "Only populated when calibration.method != uncalibrated" }
+            }
+          }
+        },
+        "shotCount": { "type": "integer" },
+        "topShotSpeedKmh": { "type": "number", "description": "Only populated when calibration.method != uncalibrated and at least one shot was detected" },
+        "calibration": {
+          "type": "object",
+          "required": ["method", "confidence"],
+          "properties": {
+            "method": { "type": "string", "enum": ["pitch-markings", "manual-distance", "uncalibrated"] },
+            "confidence": { "type": "number" }
+          }
+        }
+      }
+    },
+
     "anomalies": {
       "type": "array",
       "items": {
@@ -114,6 +163,21 @@
       "calibration": { "method": "pitch-markings", "confidence": 0.82 }
     },
     "gaitBalance": { "score": 88 },
+    "ballMetrics": {
+      "detected": true,
+      "framesSampled": 120,
+      "framesWithBallDetected": 97,
+      "detectionConfidence": 81.4,
+      "trajectory": [
+        { "timestampSeconds": 3.1, "xNorm": 0.42, "yNorm": 0.61, "confidence": 0.78 }
+      ],
+      "shots": [
+        { "timestampSeconds": 5.4, "speedKmh": null }
+      ],
+      "shotCount": 1,
+      "topShotSpeedKmh": null,
+      "calibration": { "method": "uncalibrated", "confidence": 0 }
+    },
     "anomalies": [
       { "type": "asymmetric_stride", "severity": "Warning", "timestampSeconds": 6.8, "description": "Left stride 14% shorter than right over a 2s window" }
     ],
