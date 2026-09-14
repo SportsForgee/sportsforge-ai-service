@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+models_cache/
+scripts/_pose_sample.jpg
+scripts/sample_clip.mp4
+
+# Runtime data (uploaded videos, AI-generated proof assets) — not source
+storage/
+
+# Environment files
+.env
+.env.local
+
+# Logs
+*.log
+
+# OS / Editor
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
