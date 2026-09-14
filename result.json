@@ -1,0 +1,107 @@
+{
+  "videoId": "sample-video-1",
+  "athleteId": "sample-athlete",
+  "status": "Complete",
+  "durationSeconds": 3.0,
+  "fps": 12.0,
+  "failureReason": null,
+  "annotatedVideoUrl": null,
+  "poseMetrics": {
+    "jointAngleWindows": [
+      {
+        "startSeconds": 0.0,
+        "endSeconds": 2.0,
+        "avgKneeAngleDeg": 139.7,
+        "avgHipAngleDeg": 117.4,
+        "avgAnkleAngleDeg": 152.8
+      },
+      {
+        "startSeconds": 2.0,
+        "endSeconds": 4.0,
+        "avgKneeAngleDeg": 140.0,
+        "avgHipAngleDeg": 116.9,
+        "avgAnkleAngleDeg": 154.5
+      }
+    ],
+    "symmetryScore": 0.0,
+    "postureStabilityScore": 99.3,
+    "detectionConfidence": 99.6,
+    "framesSampled": 36,
+    "framesWithPersonDetected": 36
+  },
+  "speedMetrics": {
+    "topSpeedKmh": 1.05,
+    "avgSpeedKmh": 0.65,
+    "accelerationPeaksMs2": [
+      0.11,
+      0.09,
+      -0.09,
+      -0.08,
+      0.08
+    ],
+    "strideFrequencyHz": null,
+    "calibration": {
+      "method": "manual-distance",
+      "confidence": 0.7
+    }
+  },
+  "gaitBalance": {
+    "score": 39.7
+  },
+  "ballMetrics": {
+    "detected": false,
+    "framesSampled": 36,
+    "framesWithBallDetected": 0,
+    "detectionConfidence": null,
+    "trajectory": [],
+    "topSpeedKmh": null,
+    "avgSpeedKmh": null,
+    "shots": [],
+    "shotCount": null,
+    "topShotSpeedKmh": null,
+    "calibration": {
+      "method": "uncalibrated",
+      "confidence": 0.0
+    }
+  },
+  "anomalies": [
+    {
+      "type": "asymmetric_stride",
+      "severity": "Warning",
+      "timestampSeconds": 2.0,
+      "description": "Left/right symmetry score is 0/100 \u2014 below the 70 threshold."
+    },
+    {
+      "type": "knee_valgus",
+      "severity": "Warning",
+      "timestampSeconds": 0.0,
+      "description": "Knee angle averaged 140\u00b0 in this window \u2014 deep flexion pattern worth a coach review."
+    }
+  ],
+  "keyframes": [
+    {
+      "timestampSeconds": 2.0,
+      "label": "asymmetric_stride",
+      "thumbnailUrl": "/storage/videos/sample-athlete/sample-video-1/keyframes/keyframe_0_asymmetric_stride.jpg"
+    },
+    {
+      "timestampSeconds": 0.0,
+      "label": "knee_valgus",
+      "thumbnailUrl": "/storage/videos/sample-athlete/sample-video-1/keyframes/keyframe_1_knee_valgus.jpg"
+    }
+  ],
+  "drillRecommendations": [
+    {
+      "anomalyType": "asymmetric_stride",
+      "title": "Single-Leg Stability Drills",
+      "description": "Single-leg RDLs and lateral step-downs to build left/right symmetry and correct stride imbalance.",
+      "category": "skill"
+    },
+    {
+      "anomalyType": "knee_valgus",
+      "title": "Knee-Tracking Strength Work",
+      "description": "Banded lateral walks and controlled box step-downs to reinforce proper knee alignment under load.",
+      "category": "strength"
+    }
+  ]
+}

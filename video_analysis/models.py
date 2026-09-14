@@ -53,6 +53,41 @@ class GaitBalance(BaseModel):
     score: float
 
 
+class BallTrajectoryPoint(BaseModel):
+    timestampSeconds: float
+    xNorm: float  # ball center, normalized 0-1 across frame width
+    yNorm: float  # ball center, normalized 0-1 across frame height
+    confidence: float  # YOLO detection confidence for this frame, 0-1
+
+
+class ShotSpeedEvent(BaseModel):
+    """Phase 4: a single detected 'shot' — a frame-to-frame ball speed spike well above
+    the clip's own typical ball movement (rolling/dribbling), e.g. a kick or strike.
+    timestampSeconds marks the peak-speed frame of that event. speedKmh follows the same
+    calibration honesty rule as everywhere else: null unless the caller supplied a
+    reference distance — the event itself (that a shot happened, and when) is still
+    reported uncalibrated since detecting it doesn't require real-world units."""
+    timestampSeconds: float
+    speedKmh: Optional[float] = None
+
+
+class BallMetrics(BaseModel):
+    detected: bool = False
+    framesSampled: Optional[int] = None
+    framesWithBallDetected: Optional[int] = None
+    # 0-100. Avg YOLO confidence across frames where the ball was detected — same
+    # trust-transparency convention as PoseMetrics.detectionConfidence.
+    detectionConfidence: Optional[float] = None
+    trajectory: List[BallTrajectoryPoint] = []
+    topSpeedKmh: Optional[float] = None
+    avgSpeedKmh: Optional[float] = None
+    # Phase 4: discrete shot/strike events found in the ball's trajectory.
+    shots: List[ShotSpeedEvent] = []
+    shotCount: Optional[int] = None
+    topShotSpeedKmh: Optional[float] = None
+    calibration: Calibration = Calibration()
+
+
 class Anomaly(BaseModel):
     type: str
     severity: str  # Info | Warning | Critical
@@ -89,6 +124,7 @@ class AnalysisResult(BaseModel):
     poseMetrics: Optional[PoseMetrics] = None
     speedMetrics: Optional[SpeedMetrics] = None
     gaitBalance: Optional[GaitBalance] = None
+    ballMetrics: Optional[BallMetrics] = None
     anomalies: List[Anomaly] = []
     keyframes: List[Keyframe] = []
     drillRecommendations: List[DrillRecommendation] = []
